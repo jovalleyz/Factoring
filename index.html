@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Flujo - Seguro de Factoring UNIT</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        unitBlue: '#0A1E5C',
+                        unitOrange: '#FF5C35',
+                        empresaA: '#fdf2f8', // pink-50
+                        empresaB: '#f0fdf4', // green-50
+                        factor: '#eff6ff',   // blue-50
+                        asegurador: '#f5f3ff', // violet-50
+                        reasegurador: '#f0fdfa', // teal-50
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f3f4f6; }
+        .timeline-line { position: absolute; left: 24px; top: 0; bottom: 0; width: 2px; background-color: #e5e7eb; z-index: 0; }
+        .step-icon { position: relative; z-index: 10; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- Componentes UI Auxiliares ---
+        const Icon = ({ name, size = 24, className = "" }) => {
+            useEffect(() => {
+                lucide.createIcons();
+            }, [name]);
+            return <i data-lucide={name} width={size} height={size} className={className}></i>;
+        };
+
+        const EntityBadge = ({ name, role, colorClass, borderClass }) => (
+            <div className={`flex flex-col items-center p-2 rounded-lg border ${colorClass} ${borderClass} w-32 text-center shadow-sm`}>
+                <span className="font-bold text-sm text-gray-800">{name}</span>
+                <span className="text-xs text-gray-500">{role}</span>
+            </div>
+        );
+
+        const CalcBox = ({ title, value, detail, highlight = false }) => (
+            <div className={`p-3 rounded border ${highlight ? 'bg-unitBlue text-white border-unitBlue' : 'bg-gray-50 border-gray-200'}`}>
+                <div className={`text-xs font-semibold uppercase ${highlight ? 'text-blue-200' : 'text-gray-500'}`}>{title}</div>
+                <div className={`font-bold text-lg ${highlight ? 'text-white' : 'text-gray-900'}`}>{value}</div>
+                {detail && <div className={`text-xs mt-1 ${highlight ? 'text-blue-100' : 'text-gray-400'}`}>{detail}</div>}
+            </div>
+        );
+
+        // --- Aplicación Principal ---
+        const App = () => {
+            // Estado de los inputs
+            const [nombreEmpresaA, setNombreEmpresaA] = useState('Empresa A');
+            const [nombreEmpresaB, setNombreEmpresaB] = useState('Empresa B');
+            const [facturaAmount, setFacturaAmount] = useState(75000);
+            const [plazoDias, setPlazoDias] = useState(90);
+            const [anticipoPct, setAnticipoPct] = useState(95);
+            const [primaPct, setPrimaPct] = useState(0.28);
+            const [iscPct, setIscPct] = useState(16);
+            const [escenario, setEscenario] = useState('atraso'); // 'tiempo' | 'atraso'
+            const [recuperoAmount, setRecuperoAmount] = useState(45000);
+            const [comisionPct, setComisionPct] = useState(15);
+
+            // Cálculos derivados
+            const anticipoAmount = (facturaAmount * anticipoPct) / 100;
+            const primaBase = (facturaAmount * primaPct) / 100;
+            const primaIsc = primaBase * (iscPct / 100);
+            const primaTotal = primaBase + primaIsc;
+            
+            // Limitamos el recupero al monto total de la factura
+            const recuperoReal = Math.min(recuperoAmount, facturaAmount);
+            const siniestroNeto = Math.max(0, facturaAmount - recuperoReal);
+            const comisionMonto = (siniestroNeto * comisionPct) / 100;
+
+            const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(val);
+
+            // Evitar re-renders de iconos
+            useEffect(() => { lucide.createIcons(); });
+
+            return (
+                <div className="min-h-screen flex flex-col">
+                    {/* Header con Logo Simulado */}
+                    <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+                        <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+                            <div className="flex items-center text-3xl font-black tracking-tighter">
+                                <span className="text-unitBlue">UN</span>
+                                <span className="text-unitOrange">IT</span>
+                                <span className="ml-3 text-base font-semibold text-gray-600 border-l border-gray-300 pl-3 tracking-normal">Simulador Flujo Seguro Factoring v1.2</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="flex-1 max-w-7xl mx-auto w-full flex flex-col md:flex-row p-4 gap-6">
+                        
+                        {/* PANEL IZQUIERDO: Controles */}
+                        <aside className="w-full md:w-80 bg-white rounded-xl shadow-md border border-gray-200 p-5 h-fit md:sticky md:top-20 shrink-0">
+                            <h2 className="text-lg font-bold text-unitBlue mb-4 flex items-center gap-2">
+                                <Icon name="sliders" size={20} />
+                                Parámetros del Flujo
+                            </h2>
+
+                            <div className="space-y-4">
+                                {/* Sección 1: Factura */}
+                                <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                    <h3 className="text-xs font-bold text-gray-500 uppercase mb-2">1. Datos de Factura</h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm text-gray-700 mb-1">Nombre Proveedor (Cede)</label>
+                                            <input type="text" value={nombreEmpresaA} onChange={e => setNombreEmpresaA(e.target.value)} 
+                                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-unitOrange outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-gray-700 mb-1">Nombre Deudor (Paga)</label>
+                                            <input type="text" value={nombreEmpresaB} onChange={e => setNombreEmpresaB(e.target.value)} 
+                                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-unitOrange outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-gray-700 mb-1">Monto Factura (USD)</label>
+                                            <input type="number" value={facturaAmount} onChange={e => setFacturaAmount(Number(e.target.value))} 
+                                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-unitOrange focus:border-unitOrange outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-gray-700 mb-1">Plazo (Días)</label>
+                                            <input type="number" value={plazoDias} onChange={e => setPlazoDias(Number(e.target.value))} 
+                                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-unitOrange outline-none" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Sección 2: Factor & Seguro */}
+                                <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                    <h3 className="text-xs font-bold text-gray-500 uppercase mb-2">2. Condiciones Comerciales</h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm text-gray-700 mb-1">% Anticipo Factor</label>
+                                            <input type="number" step="1" value={anticipoPct} onChange={e => setAnticipoPct(Number(e.target.value))} 
+                                                className="w-full p-2 border border-gray-300 rounded outline-none" />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                                <label className="block text-sm text-gray-700 mb-1">Tasa Prima (%)</label>
+                                                <input type="number" step="0.01" value={primaPct} onChange={e => setPrimaPct(Number(e.target.value))} 
+                                                    className="w-full p-2 border border-gray-300 rounded outline-none" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm text-gray-700 mb-1">ISC (%)</label>
+                                                <input type="number" step="1" value={iscPct} onChange={e => setIscPct(Number(e.target.value))} 
+                                                    className="w-full p-2 border border-gray-300 rounded outline-none" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Sección 3: Escenario */}
+                                <div className="p-3 bg-unitBlue rounded-lg border border-unitBlue shadow-inner">
+                                    <h3 className="text-xs font-bold text-blue-200 uppercase mb-2">3. Escenario de Pago</h3>
+                                    
+                                    <div className="flex bg-blue-900 rounded-md p-1 mb-3">
+                                        <button 
+                                            onClick={() => setEscenario('tiempo')}
+                                            className={`flex-1 text-sm py-1.5 rounded transition-colors ${escenario === 'tiempo' ? 'bg-white text-unitBlue font-bold' : 'text-blue-200 hover:text-white'}`}>
+                                            Pago a Tiempo
+                                        </button>
+                                        <button 
+                                            onClick={() => setEscenario('atraso')}
+                                            className={`flex-1 text-sm py-1.5 rounded transition-colors ${escenario === 'atraso' ? 'bg-unitOrange text-white font-bold' : 'text-blue-200 hover:text-white'}`}>
+                                            Atraso / Siniestro
+                                        </button>
+                                    </div>
+
+                                    {escenario === 'atraso' && (
+                                        <div className="space-y-3 animate-fade-in text-white">
+                                            <div>
+                                                <label className="block text-sm text-blue-100 mb-1">Monto Recupero (USD)</label>
+                                                <input type="number" value={recuperoAmount} onChange={e => setRecuperoAmount(Number(e.target.value))} 
+                                                    className="w-full p-2 border-none rounded bg-blue-800 text-white outline-none focus:ring-2 focus:ring-unitOrange" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm text-blue-100 mb-1">Comisión Reasegurador (%)</label>
+                                                <input type="number" value={comisionPct} onChange={e => setComisionPct(Number(e.target.value))} 
+                                                    className="w-full p-2 border-none rounded bg-blue-800 text-white outline-none focus:ring-2 focus:ring-unitOrange" />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </aside>
+
+                        {/* PANEL DERECHO: Visualización del Flujo */}
+                        <main className="flex-1 bg-white rounded-xl shadow-md border border-gray-200 p-2 md:p-6 overflow-hidden">
+                            
+                            {/* Leyenda de Entidades (Header del Flujo) */}
+                            <div className="flex flex-wrap justify-between gap-2 mb-8 pb-4 border-b border-gray-100">
+                                <EntityBadge name={nombreEmpresaA || 'Empresa A'} role="Proveedor" colorClass="bg-empresaA" borderClass="border-red-200" />
+                                <EntityBadge name={nombreEmpresaB || 'Empresa B'} role="Deudor" colorClass="bg-empresaB" borderClass="border-green-200" />
+                                <EntityBadge name="Velocifactor" role="Factor" colorClass="bg-factor" borderClass="border-blue-200" />
+                                <EntityBadge name="UNIT" role="Asegurador" colorClass="bg-asegurador" borderClass="border-indigo-200" />
+                                <EntityBadge name="Reasegurador" role="Cedente" colorClass="bg-reasegurador" borderClass="border-teal-200" />
+                            </div>
+
+                            {/* Timeline container */}
+                            <div className="relative pl-8 md:pl-12 pb-10">
+                                <div className="timeline-line"></div>
+
+                                {/* FASE 1: Emisión */}
+                                <div className="relative mb-10">
+                                    <div className="absolute -left-[45px] md:-left-[61px] bg-white rounded-full p-1 border-2 border-red-300 step-icon">
+                                        <Icon name="file-text" size={20} className="text-red-500" />
+                                    </div>
+                                    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm ml-2">
+                                        <h4 className="font-bold text-gray-800 flex items-center gap-2">FASE 1: Emisión Factura <span className="text-sm font-normal text-gray-500">(1 Abril)</span></h4>
+                                        <div className="mt-3 flex flex-col md:flex-row items-start md:items-center gap-4 text-sm">
+                                            <div className="flex items-center gap-2 text-gray-600">
+                                                <span className="font-semibold text-red-600">{nombreEmpresaA || 'Empresa A'}</span> 
+                                                <Icon name="arrow-right" size={16} /> 
+                                                <span className="font-semibold text-green-600">{nombreEmpresaB || 'Empresa B'}</span>
+                                            </div>
+                                            <div className="bg-gray-100 px-3 py-1.5 rounded flex items-center gap-2 border-l-4 border-red-400">
+                                                <span>Factura: <strong>{formatCurrency(facturaAmount)}</strong></span>
+                                                <span className="text-gray-400">|</span>
+                                                <span>Plazo: <strong>{plazoDias} días</strong></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* FASE 2: Factor compra */}
+                                <div className="relative mb-10">
+                                    <div className="absolute -left-[45px] md:-left-[61px] bg-white rounded-full p-1 border-2 border-blue-300 step-icon">
+                                        <Icon name="banknote" size={20} className="text-blue-500" />
+                                    </div>
+                                    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm ml-2">
+                                        <h4 className="font-bold text-gray-800 flex items-center gap-2">FASE 2: Factor compra factura <span className="text-sm font-normal text-gray-500">(2 Abril)</span></h4>
+                                        
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                            {/* Acción Velocifactor */}
+                                            <div className="space-y-3">
+                                                <div className="text-sm text-gray-600">Velocifactor anticipa a {nombreEmpresaA || 'Empresa A'}:</div>
+                                                <CalcBox title={`Anticipo (${anticipoPct}%)`} value={formatCurrency(anticipoAmount)} detail={`Retiene ${100-anticipoPct}% del valor`} />
+                                                <div className="flex items-center gap-2 text-sm text-gray-600 mt-2">
+                                                    <span className="font-semibold text-blue-600">Velocifactor</span> 
+                                                    <Icon name="arrow-right" size={16} /> 
+                                                    <span className="font-semibold text-indigo-600">UNIT</span>
+                                                    <span className="text-xs text-gray-400">(Vía API Salesforce)</span>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Cálculo Prima UNIT */}
+                                            <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+                                                <h5 className="text-sm font-bold text-unitBlue mb-2 border-b border-indigo-200 pb-1">Cálculo de Prima UNIT</h5>
+                                                <ul className="text-sm space-y-1 text-gray-700 mb-3">
+                                                    <li className="flex justify-between"><span>Base ({primaPct}%):</span> <span>{formatCurrency(primaBase)}</span></li>
+                                                    <li className="flex justify-between"><span>+ ISC ({iscPct}%):</span> <span>{formatCurrency(primaIsc)}</span></li>
+                                                    <li className="flex justify-between text-gray-400"><span>Retención UNIT:</span> <span>0% (Piloto)</span></li>
+                                                </ul>
+                                                <div className="flex justify-between items-center font-bold text-lg text-unitBlue border-t border-indigo-200 pt-2">
+                                                    <span>Total Prima:</span>
+                                                    <span>{formatCurrency(primaTotal)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* FASE 3: UNIT Cede a Reasegurador */}
+                                <div className="relative mb-10">
+                                    <div className="absolute -left-[45px] md:-left-[61px] bg-white rounded-full p-1 border-2 border-indigo-300 step-icon">
+                                        <Icon name="shield" size={20} className="text-indigo-500" />
+                                    </div>
+                                    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm ml-2 flex flex-col md:flex-row justify-between items-start md:items-center">
+                                        <div>
+                                            <h4 className="font-bold text-gray-800">FASE 3: UNIT cede riesgo a Reasegurador <span className="text-sm font-normal text-gray-500">(Simultáneo)</span></h4>
+                                            <div className="text-sm text-gray-600 mt-1">Cedencia 100% = {formatCurrency(facturaAmount)} de riesgo.</div>
+                                        </div>
+                                        <div className="mt-3 md:mt-0 flex items-center gap-3 bg-teal-50 px-4 py-2 rounded-lg border border-teal-100">
+                                            <span className="font-semibold text-indigo-600">UNIT</span>
+                                            <Icon name="arrow-right" size={16} className="text-red-500" />
+                                            <span className="font-semibold text-teal-700">Reasegurador</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* BIFURCACIÓN DE ESCENARIO */}
+                                {escenario === 'tiempo' ? (
+                                    /* FASE 4A: Éxito */
+                                    <div className="relative mb-4">
+                                        <div className="absolute -left-[45px] md:-left-[61px] bg-green-100 rounded-full p-1 border-2 border-green-500 step-icon">
+                                            <Icon name="check-circle" size={20} className="text-green-600" />
+                                        </div>
+                                        <div className="bg-green-50 border-2 border-green-400 rounded-lg p-5 shadow-sm ml-2">
+                                            <h4 className="font-bold text-green-800 text-lg">FASE 4A: Ciclo Normal - {nombreEmpresaB || 'Empresa B'} Paga</h4>
+                                            <p className="text-green-700 mt-1 mb-3">Pago completo a tiempo en fecha de vencimiento.</p>
+                                            
+                                            <div className="flex items-center gap-4 text-sm font-bold bg-white p-3 rounded border border-green-200 w-fit">
+                                                <span className="text-green-600">{nombreEmpresaB || 'Empresa B'}</span> 
+                                                <span className="flex items-center text-green-500"><Icon name="arrow-right" size={16}/> Pago {formatCurrency(facturaAmount)} <Icon name="arrow-right" size={16}/></span> 
+                                                <span className="text-blue-600">Velocifactor</span>
+                                            </div>
+                                            
+                                            <div className="mt-4 text-sm text-gray-500 flex items-center gap-2 border-t border-green-200 pt-3">
+                                                <Icon name="info" size={16} />
+                                                Reporte UNIT a Reasegurador: <strong>SIN SINIESTRO</strong>. Fin del ciclo.
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* FASE 4B, 5, 6, 7: Atraso y Siniestro */
+                                    <div className="animate-fade-in">
+                                        {/* FASE 4B */}
+                                        <div className="relative mb-10">
+                                            <div className="absolute -left-[45px] md:-left-[61px] bg-orange-50 rounded-full p-1 border-2 border-unitOrange step-icon">
+                                                <Icon name="alert-triangle" size={20} className="text-unitOrange" />
+                                            </div>
+                                            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 shadow-sm ml-2">
+                                                <h4 className="font-bold text-orange-800">FASE 4B: Escenario Real - {nombreEmpresaB || 'Empresa B'} se atrasa</h4>
+                                                <p className="text-sm text-orange-700 mt-1">Sin pago en fecha de vencimiento. Inicia proceso de monitoreo.</p>
+                                                
+                                                <div className="mt-4 bg-white border border-orange-100 rounded p-3 text-sm">
+                                                    <h5 className="font-bold text-gray-700 text-center mb-2 border-b pb-1">Timeline de Atraso</h5>
+                                                    <div className="flex flex-col md:flex-row justify-between text-center gap-2">
+                                                        <div className="bg-gray-50 p-2 rounded flex-1"><span className="font-bold">+90d</span><br/><span className="text-xs">Notificación UNIT</span></div>
+                                                        <div className="hidden md:flex items-center"><Icon name="arrow-right" size={14} className="text-gray-400"/></div>
+                                                        <div className="bg-gray-50 p-2 rounded flex-1"><span className="font-bold">+120d</span><br/><span className="text-xs">Monitoreo</span></div>
+                                                        <div className="hidden md:flex items-center"><Icon name="arrow-right" size={14} className="text-gray-400"/></div>
+                                                        <div className="bg-red-50 text-red-700 p-2 rounded flex-1 border border-red-100"><span className="font-bold">+180d</span><br/><span className="text-xs">Siniestro Formal</span></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* FASE 5-6 */}
+                                        <div className="relative mb-10">
+                                            <div className="absolute -left-[45px] md:-left-[61px] bg-white rounded-full p-1 border-2 border-gray-300 step-icon">
+                                                <Icon name="refresh-ccw" size={20} className="text-gray-600" />
+                                            </div>
+                                            <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm ml-2">
+                                                <h4 className="font-bold text-gray-800">FASE 5-6: Gestión Siniestro <span className="text-sm font-normal text-gray-500">(90-180 días atraso)</span></h4>
+                                                <p className="text-sm text-gray-600 mt-1">Velocifactor intenta recupero.</p>
+                                                
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                                    <div className="flex flex-col justify-center bg-gray-50 p-3 rounded border border-gray-200">
+                                                        <span className="text-sm text-gray-500">Monto Recuperado:</span>
+                                                        <span className="text-xl font-bold text-green-600">{formatCurrency(recuperoReal)}</span>
+                                                        <span className="text-xs text-gray-400">({((recuperoReal/facturaAmount)*100).toFixed(1)}% del total)</span>
+                                                    </div>
+                                                    
+                                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                                        <h5 className="text-sm font-bold text-red-800 mb-2 border-b border-red-200 pb-1">Cálculo Siniestro Neto</h5>
+                                                        <ul className="text-sm space-y-1 text-red-900 mb-2">
+                                                            <li className="flex justify-between"><span>Bruto:</span> <span>{formatCurrency(facturaAmount)}</span></li>
+                                                            <li className="flex justify-between"><span>- Recupero:</span> <span>{formatCurrency(recuperoReal)}</span></li>
+                                                        </ul>
+                                                        <div className="flex justify-between items-center font-bold text-lg text-red-600 border-t border-red-200 pt-2">
+                                                            <span>Neto a Pagar:</span>
+                                                            <span>{formatCurrency(siniestroNeto)}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* FASE 7A */}
+                                        <div className="relative mb-10">
+                                            <div className="absolute -left-[45px] md:-left-[61px] bg-white rounded-full p-1 border-2 border-unitBlue step-icon">
+                                                <Icon name="dollar-sign" size={20} className="text-unitBlue" />
+                                            </div>
+                                            <div className="bg-white border-2 border-unitBlue rounded-lg p-4 shadow-sm ml-2">
+                                                <h4 className="font-bold text-unitBlue">FASE 7A: Pago Siniestro <span className="text-sm font-normal text-gray-500">(Día 180+)</span></h4>
+                                                
+                                                <div className="mt-4 space-y-3 relative">
+                                                    {/* Línea conectora visual interna */}
+                                                    <div className="absolute left-[8px] top-4 bottom-4 w-0.5 bg-gray-200 -z-10"></div>
+                                                    
+                                                    <div className="flex items-center gap-3 bg-white p-2 z-10 relative">
+                                                        <div className="w-4 h-4 rounded-full bg-indigo-500 shrink-0"></div>
+                                                        <div className="flex-1 text-sm">
+                                                            <span className="font-bold">UNIT</span> notifica a <span className="font-bold text-teal-700">Reasegurador</span>: Siniestro neto de {formatCurrency(siniestroNeto)} <span className="text-xs text-gray-400">(SLA: 5 días máx)</span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-3 bg-white p-2 z-10 relative">
+                                                        <div className="w-4 h-4 rounded-full bg-teal-500 shrink-0"></div>
+                                                        <div className="flex-1 text-sm">
+                                                            <span className="font-bold text-teal-700">Reasegurador</span> reembolsa a <span className="font-bold text-indigo-600">UNIT</span>: <strong className="text-green-600">{formatCurrency(siniestroNeto)}</strong> <span className="text-xs text-gray-400">(SLA: 30 días máx)</span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-3 bg-white p-2 z-10 relative">
+                                                        <div className="w-4 h-4 rounded-full bg-blue-500 shrink-0"></div>
+                                                        <div className="flex-1 text-sm">
+                                                            <span className="font-bold text-indigo-600">UNIT</span> paga siniestro a <span className="font-bold text-blue-600">Velocifactor</span>: <strong className="text-green-600">{formatCurrency(siniestroNeto)}</strong> <span className="text-xs text-gray-400">(SLA: 2 días máx desde fondos)</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* FASE 7B */}
+                                        <div className="relative mb-4">
+                                            <div className="absolute -left-[45px] md:-left-[61px] bg-white rounded-full p-1 border-2 border-gray-800 step-icon">
+                                                <Icon name="bar-chart-2" size={20} className="text-gray-800" />
+                                            </div>
+                                            <div className="bg-gray-50 border border-gray-300 rounded-lg p-4 shadow-sm ml-2">
+                                                <h4 className="font-bold text-gray-800">FASE 7B: Liquidación Contable Trimestral (Q4)</h4>
+                                                
+                                                <div className="mt-4 bg-white border border-gray-200 rounded p-4 text-sm">
+                                                    <h5 className="font-bold text-center text-gray-700 mb-3 border-b pb-2">Reporte Trimestral UNIT → Reasegurador</h5>
+                                                    <ul className="space-y-2 text-gray-600">
+                                                        <li>• Certificados emitidos: 15 | Portafolio: USD 1.2M | Primas: USD 3,360 (Datos ejemplo)</li>
+                                                        <li>• Siniestros pagados: {formatCurrency(siniestroNeto)} | Recuperos: {formatCurrency(recuperoReal)}</li>
+                                                        <li className="font-bold text-black bg-yellow-50 p-2 rounded mt-2 flex justify-between items-center border border-yellow-200">
+                                                            <span>• Comisión Reasegurador:</span>
+                                                            <span className="text-unitOrange text-lg">
+                                                                {formatCurrency(comisionMonto)} 
+                                                                <span className="text-xs font-normal text-gray-500 block text-right">({comisionPct}% × {formatCurrency(siniestroNeto)} siniestro pagado)</span>
+                                                            </span>
+                                                        </li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
